@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 一键启动 Web 服务（适用于 Linux / macOS / WSL / Git Bash）
-# 用法：chmod +x run.sh && ./run.sh
+# 用法：./run.sh  或  bash run.sh（无需 chmod）
 
 set -euo pipefail
 
@@ -26,8 +26,13 @@ fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 
-echo ">>> 安装依赖（requirements.txt）…"
-pip install -r requirements.txt -q
+if python -c "import chromadb, openai, fastapi, uvicorn, dotenv" 2>/dev/null; then
+  echo ">>> 依赖已在 .venv 中就绪，跳过 pip。更新依赖后可删除 .venv 再运行本脚本。"
+else
+  echo ">>> 当前 .venv 里还缺包，正在 pip install -r requirements.txt …"
+  python -m pip install --upgrade pip
+  python -m pip install -r requirements.txt
+fi
 
 # 没有 .env 时从模板复制（仍需你填入真实 Key，否则问答会报错）
 if [[ ! -f .env ]]; then
