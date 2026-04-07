@@ -23,7 +23,8 @@
 
 ```
 仓库根/
-├── run.sh                # 一键：建 venv、装依赖、检查 .env、启动 uvicorn（Bash）
+├── run.bat               # Windows 一键启动（CMD / PowerShell 双击或运行）
+├── run.sh                # Linux / macOS / WSL / Git Bash 一键启动（无需 chmod 时可直接 bash run.sh）
 ├── .env.example          # 环境变量模板（勿提交真实 .env）
 ├── requirements.txt      # Python 依赖
 ├── data/                 # 知识库：*.txt / *.md（示例含脱敏 SOP）
@@ -52,18 +53,25 @@
 
 ### 一键启动（最少步骤）
 
-在 **Linux / macOS / WSL / Git Bash** 下，于仓库根目录执行：
+**Windows（PowerShell / CMD）**不要用 `chmod`（那是 Linux 命令，会报「无法识别」）。在仓库根目录执行：
 
-```bash
-chmod +x run.sh
-./run.sh
+```powershell
+.\run.bat
 ```
 
-脚本会：创建 **`./.venv`** → `pip install -r requirements.txt` → 若没有 **`.env`** 则从 **`.env.example`** 复制一份并提示你**编辑填入 Key 后重新运行** → 启动 **http://127.0.0.1:8000**。
+或资源管理器中**双击 `run.bat`**。
 
-**仍需你完成的一件事**：在仓库根编辑 **`.env`** 写入真实 API Key（脚本无法代填）。首次若因复制 `.env` 而退出，改完再执行一次 `./run.sh` 即可。
+**Linux / macOS / WSL / Git Bash** 任选其一：
 
-原生 **Windows CMD** 没有 Bash，可改用 **WSL**、**Git Bash**，或见下文手动命令。
+```bash
+./run.sh
+# 若提示没有执行权限，再执行：chmod +x run.sh
+# 或直接：bash run.sh
+```
+
+脚本会：创建 **`./.venv`** → 若该环境里**已能导入** chromadb / openai 等则**跳过 pip**（避免每次启动都联网检查）；否则再执行 `pip install -r requirements.txt`。**依赖若只装在系统 Python 而未装入 `.venv`，第一次仍会安装到 `.venv`。** → 若没有 **`.env`** 则从 **`.env.example`** 复制并提示填 Key → 启动 **http://127.0.0.1:8000**。
+
+**仍需你完成的一件事**：在仓库根编辑 **`.env`** 写入真实 API Key。`run.bat` / `run.sh` 首次若因复制 `.env` 而结束，填好 Key 后再运行一次即可。
 
 ---
 
