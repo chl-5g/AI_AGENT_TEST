@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>极简 RAG 客服</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --accent: #3d8bfd;
+      --accent-hover: #5a9dff;
+      --border: #2d3a4d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+    main {
+      width: 100%;
+      max-width: 40rem;
+    }
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 0 0 0.25rem;
+    }
+    .sub {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin-bottom: 1.5rem;
+    }
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+    textarea {
+      width: 100%;
+      min-height: 6rem;
+      padding: 0.75rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      font-size: 1rem;
+      line-height: 1.5;
+      resize: vertical;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(61, 139, 253, 0.25);
+    }
+    .row {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1rem;
+      align-items: center;
+    }
+    button {
+      padding: 0.6rem 1.25rem;
+      border: none;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: var(--accent-hover); }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .out {
+      margin-top: 1.75rem;
+      padding: 1rem 1.1rem;
+      border-radius: 8px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      min-height: 3rem;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }
+    .out.empty { color: var(--muted); }
+    .err { color: #f87171; }
+    footer {
+      margin-top: 2rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    footer a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>极简 RAG 客服</h1>
+    <p class="sub">在下方输入问题，回答会基于 <code>data/</code> 中的资料检索生成。</p>
+
+    <label for="q">你的问题</label>
+    <textarea id="q" placeholder="例如：需求变更要走什么流程？" autofocus></textarea>
+
+    <div class="row">
+      <button type="button" id="send">发送</button>
+      <span id="hint" class="sub" style="margin:0;"></span>
+    </div>
+
+    <div id="answer" class="out empty">回答会显示在这里。</div>
+  </main>
+  <footer>
+    <a href="/docs">API 文档</a>
+    · 服务启动时会自动重建索引，无需手动点 /init
+  </footer>
+
+  <script>
+    const q = document.getElementById("q");
+    const send = document.getElementById("send");
+    const answer = document.getElementById("answer");
+    const hint = document.getElementById("hint");
+
+    // 使用当前页面的 origin，避免相对路径在「非本服务打开的页面」里指错主机
+    const apiChat = () => `${window.location.origin}/chat`;
+
+    function formatFetchError(err) {
+      const msg = err && err.message ? err.message : String(err);
+      if (/fail/i.test(msg) || /network/i.test(msg) || /load failed/i.test(msg)) {
+        return (
+          msg +
+          "\n\n常见原因：\n" +
+          "1）uvicorn 未在运行或已崩溃，请在看得到日志的终端里执行：uvicorn main:app --reload --host 127.0.0.1 --port 8000\n" +
+          "2）不要用 Cursor/IDE 内置预览打开本页，请用 Chrome 或 Edge 地址栏输入：http://127.0.0.1:8000/\n" +
+          "3）地址栏必须是 http://127.0.0.1:8000 打开的本页（不要本地 file:// 打开 static/index.html）\n" +
+          "4）可新开标签访问 " +
+          window.location.origin +
+          "/health 应显示 {\"status\":\"ok\"}\n" +
+          "5）关闭拦截 localhost 的广告/隐私类浏览器扩展后重试"
+        );
+      }
+      return msg;
+    }
+
+    async function ask() {
+      const text = q.value.trim();
+      if (!text) {
+        answer.className = "out err";
+        answer.textContent = "请先输入问题。";
+        return;
+      }
+      send.disabled = true;
+      hint.textContent = "正在生成…";
+      answer.className = "out";
+      answer.textContent = "";
+
+      try {
+        const res = await fetch(apiChat(), {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ query: text }),
+          cache: "no-store",
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          let detail = res.statusText;
+          if (data.detail != null) {
+            detail = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+          }
+          throw new Error(detail || "请求失败");
+        }
+        answer.className = "out";
+        answer.textContent = data.answer || "(空回答)";
+      } catch (e) {
+        answer.className = "out err";
+        answer.textContent = "出错：" + formatFetchError(e);
+      } finally {
+        send.disabled = false;
+        hint.textContent = "";
+      }
+    }
+
+    send.addEventListener("click", ask);
+    q.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) ask();
+    });
+  </script>
+</body>
+</html>
