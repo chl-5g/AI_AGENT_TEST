@@ -116,13 +116,3 @@ python cli.py --init 任意  # 强制重建索引后再问
 - PDF/Docx 自动解析、引用溯源、异步大批量入库、独立配置模块等。
 
 ---
-
-## 远程仓库
-
-推送前请确认已配置 `origin`（示例）：`https://github.com/chl-5g/AI_AGENT_TEST.git`
-
-```bash
-git add -A
-git commit -m "你的说明"
-git push origin main
-```
