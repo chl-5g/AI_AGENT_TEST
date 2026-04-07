@@ -4,9 +4,9 @@ main.py — FastAPI 应用入口（路由 + 启动时自动入库 + 简易问答
 职责概览：
     - 模块加载时尽早调用 load_project_env()，从「项目根」读取 .env，避免在非项目目录
       执行 `uvicorn main:app` 时读不到 OPENAI_* / OPENROUTER_*。
-    - lifespan：应用启动阶段同步执行 ingestion.initialize()，完成「扫描 data/ → 切片 →
-      写入 Chroma」；失败时记录完整异常栈，但服务仍会启动，便于你打开 / 页查看说明或
-      修正 .env 后重启（不必因入库失败而进程直接退出）。
+    - lifespan：若本地 Chroma 已有非空索引则**跳过**入库（省 Token、避免 --reload 反复嵌入）；
+      否则执行 ingestion.initialize()。全量重建请 POST /init 或删 chroma_data/ 后重启。
+      失败时记录完整异常栈，但服务仍会启动。
     - 路由：GET / 返回 static/index.html；POST /chat 调用 bot.chat；POST /init 可手动
       全量重建索引；GET /health 供探活。
 
@@ -19,7 +19,6 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +26,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from bot import chat
-from ingestion import initialize, load_project_env
+from ingestion import PROJECT_ROOT, has_indexed_documents, initialize, load_project_env
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +38,8 @@ logger = logging.getLogger(__name__)
 # 行为一致。注意：lifespan 内不再重复调用 load_project_env()，避免冗余。
 load_project_env()
 
-# 静态页：使用 __file__ 解析目录，不依赖「当前工作目录 cwd」，避免从别的路径启动
-# uvicorn 时找不到 index.html。
-_STATIC_INDEX = Path(__file__).resolve().parent / "static" / "index.html"
+# 静态页在仓库根目录 static/（与 ingestion.PROJECT_ROOT 一致，代码在 script/ 时也能找到）
+_STATIC_INDEX = PROJECT_ROOT / "static" / "index.html"
 
 
 @asynccontextmanager
@@ -50,8 +48,9 @@ async def lifespan(app: FastAPI):
     FastAPI 应用生命周期（启动 / 关闭）。
 
     启动阶段：
-        同步执行 initialize()：扫描 data/ 下 .txt/.md、切片、删除并重建 Chroma 集合、
-        写入向量。这是「极简 RAG」的自动入库入口，用户一般无需再手动 POST /init。
+        若 has_indexed_documents() 为 True（已有非空集合），则**不**调用 initialize()，
+        避免 --reload 每次重启都重新打 Embedding。否则执行 initialize() 完成首次入库。
+        更新资料后请 POST /init，或删除 chroma_data/ 后重启，或 CLI `python script/cli.py --init`。
 
     失败处理：
         任意异常会被 logger.exception 打出完整栈；服务进程仍继续运行，yield 后正常
@@ -64,8 +63,14 @@ async def lifespan(app: FastAPI):
     if not logging.root.handlers:
         logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
-        stats = initialize()
-        logger.info("启动时自动入库完成: %s", stats)
+        if has_indexed_documents():
+            logger.info(
+                "检测到已有 Chroma 索引（非空），跳过启动时入库；"
+                "更新 data/ 后请 POST /init 或删除 chroma_data/ 后重启"
+            )
+        else:
+            stats = initialize()
+            logger.info("启动时自动入库完成: %s", stats)
     except Exception:
         logger.exception(
             "启动时自动入库失败：请检查 OPENAI_API_KEY、嵌入相关配置，以及 data/ 下是否有 .txt/.md"
@@ -140,7 +145,7 @@ def post_init():
     典型场景：你刚更新了 data/ 下的文档，且不想重启 uvicorn，可调用本接口触发
     与启动时相同的 initialize()（删集合、重建、重新嵌入）。
 
-    说明：正常流程下 lifespan 已执行过一次 initialize()，多数时候不必调用 /init。
+    说明：若启动时因已有索引跳过了入库，改完 data/ 后应调用本接口或删库后重启。
     失败时（缺 Key、嵌入网关错误等）返回 503，detail 为 RuntimeError 的文案。
     """
     try:

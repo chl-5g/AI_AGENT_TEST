@@ -1,7 +1,7 @@
 """
 cli.py — 命令行向 RAG 客服提问（无需浏览器、无需先开 uvicorn）
 
-用法示例（在项目根目录、已配置 .env 的前提下）：
+用法示例（在 **script/** 目录执行；**.env 在仓库根**，与 data/ 同级）：
 
     一次性提问（整句作为参数，多个词会拼成一句）：
         python cli.py 需求变更要走什么流程？
@@ -27,30 +27,25 @@ from __future__ import annotations
 import argparse
 import sys
 
-import chromadb
-
 from bot import chat
-from ingestion import CHROMA_PATH, COLLECTION_NAME, initialize, load_project_env, openai_embedding_function
+from ingestion import has_indexed_documents, initialize, load_project_env
 
 
-def _collection_has_documents() -> bool:
+def _configure_stdio_utf8() -> None:
     """
-    判断当前持久化目录下是否已有可检索的向量数据。
-
-    实现：用与 bot 相同的 CHROMA_PATH、COLLECTION_NAME 和 openai_embedding_function()
-    打开集合并 count()。任一步失败（集合不存在、嵌入 Key 未配、网关不可达等）均捕获
-    后返回 False，视为「未就绪」，由 _ensure_index 决定是否调用 initialize()。
-
-    注意：这里不打印异常，避免首次空库时刷屏；真正入库失败会在 initialize() 时抛出。
+    Windows 控制台默认编码常为 GBK/系统 ANSI，不处理时 print 中文或读入参数可能乱码。
+    将 stdout/stderr 设为 UTF-8，与 ingestion 中 read_text(encoding='utf-8') 一致。
+    （data/ 文件读取已在 ingestion 显式 utf-8；此处负责终端输出侧。）
     """
-    try:
-        client = chromadb.PersistentClient(path=CHROMA_PATH)
-        ef = openai_embedding_function()
-        col = client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
-        # Chroma Collection.count()：集合内向量条数（与入库 chunks 数量一致）
-        return col.count() > 0
-    except Exception:
-        return False
+    if sys.platform != "win32":
+        return
+    for stream in (sys.stdout, sys.stderr):
+        reconf = getattr(stream, "reconfigure", None)
+        if callable(reconf):
+            try:
+                reconf(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
 
 
 def _ensure_index(*, force: bool, auto: bool) -> None:
@@ -70,7 +65,7 @@ def _ensure_index(*, force: bool, auto: bool) -> None:
         return
     if not auto:
         return
-    if _collection_has_documents():
+    if has_indexed_documents():
         return
     stats = initialize()
     print("已自动建立索引（首次或空库）:", stats, file=sys.stderr)
@@ -90,6 +85,7 @@ def _run_query(text: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_stdio_utf8()
     # 与 FastAPI 入口一致：优先从项目根加载 .env（路径由 ingestion.PROJECT_ROOT 决定）
     load_project_env()
 

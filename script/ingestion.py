@@ -25,13 +25,12 @@ from chromadb.utils import embedding_functions
 from dotenv import load_dotenv
 
 # ---------------------------------------------------------------------------
-# 项目根目录（本文件所在目录即仓库/项目根）
+# 项目根目录（含 data/、.env、chroma_data/、static/）
 # ---------------------------------------------------------------------------
-# .env、data/、chroma_data/ 均相对此路径解析，避免「从其它工作目录启动」时：
-#   - load_dotenv 找不到 .env
-#   - _collect_source_files 扫不到 data
-#   - PersistentClient 把向量库建到意外目录
-PROJECT_ROOT = Path(__file__).resolve().parent
+# 若本文件在仓库的 script/ 下，则根目录为上一级，与根目录的 data/、static/ 对齐；
+# 若单文件平铺在项目根，则 parent 仍为该目录（name != "script" 时）。
+_THIS_FILE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = _THIS_FILE_DIR.parent if _THIS_FILE_DIR.name == "script" else _THIS_FILE_DIR
 
 
 def load_project_env() -> None:
@@ -139,6 +138,8 @@ def openai_embedding_function():
         x_title = (os.environ.get("OPENROUTER_X_TITLE") or "").strip()
         if x_title:
             headers["X-Title"] = x_title
+        # Chroma OpenAIEmbeddingFunction 会向 api_base + /embeddings 发请求；
+        # OpenRouter 兼容端点为 https://openrouter.ai/api/v1（无尾斜杠，由 normalize_api_base 保证）。
         return embedding_functions.OpenAIEmbeddingFunction(
             api_key=api_key,
             model_name=model_name,
@@ -257,6 +258,28 @@ def _collect_source_files() -> list[str]:
             if p.is_file():
                 seen.add(p.resolve())
     return sorted(str(p) for p in seen)
+
+
+def has_indexed_documents() -> bool:
+    """
+    判断本地是否已有「非空」向量索引，供 main 启动时决定是否跳过 initialize()。
+
+    用途：避免 uvicorn --reload 每次重启都全量重新 Embedding，浪费 Token 且拖慢启动。
+    逻辑：chroma_data 目录存在 → 用与入库相同的嵌入函数打开集合并 count()>0。
+    任一步失败（目录不存在、集合不存在、Key 未配等）返回 False，启动流程会走 initialize()。
+
+    注意：更新 data/ 后若需重建，请 POST /init，或删除 chroma_data/ 后重启，或 CLI --init。
+    """
+    load_project_env()
+    if not Path(CHROMA_PATH).is_dir():
+        return False
+    try:
+        client = chromadb.PersistentClient(path=CHROMA_PATH)
+        ef = openai_embedding_function()
+        col = client.get_collection(name=COLLECTION_NAME, embedding_function=ef)
+        return col.count() > 0
+    except Exception:
+        return False
 
 
 def initialize() -> dict[str, int]:

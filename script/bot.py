@@ -18,11 +18,19 @@ bot.py — RAG 问答：Chroma 向量检索 + OpenAI 兼容「对话」API
 from __future__ import annotations
 
 import os
+import sys
 
 import chromadb
 from openai import OpenAI
 
-from ingestion import CHROMA_PATH, COLLECTION_NAME, load_project_env, normalize_api_base, openai_embedding_function
+from ingestion import (
+    CHROMA_PATH,
+    COLLECTION_NAME,
+    PROJECT_ROOT,
+    load_project_env,
+    normalize_api_base,
+    openai_embedding_function,
+)
 
 # 每次 query 返回最相近的文档段数量；过大易撑满上下文，过小可能漏掉关键句。
 TOP_K = 5
@@ -51,7 +59,8 @@ def _openai_chat_client() -> OpenAI:
     api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     if not api_key:
         raise RuntimeError(
-            "未检测到 OPENAI_API_KEY。请在项目根目录的 .env 中配置（与 main.py、ingestion.py 同级目录）。"
+            "未检测到 OPENAI_API_KEY。请在项目根目录的 .env 中配置："
+            f"{PROJECT_ROOT / '.env'}"
         )
     base = normalize_api_base(os.environ.get("OPENAI_BASE_URL"))
     if base:
@@ -76,7 +85,8 @@ def _get_collection():
         or os.environ.get("OPENROUTER_API_KEY")
     ):
         raise RuntimeError(
-            "未检测到 OPENAI_API_KEY（或 OPENAI_EMBEDDING_API_KEY / OPENROUTER_API_KEY）。请检查项目根目录 .env 是否已保存。"
+            "未检测到 OPENAI_API_KEY（或 OPENAI_EMBEDDING_API_KEY / OPENROUTER_API_KEY）。"
+            f"请检查：{PROJECT_ROOT / '.env'}"
         )
     embedding_fn = openai_embedding_function()
     client = chromadb.PersistentClient(path=CHROMA_PATH)
@@ -104,6 +114,11 @@ def chat(query: str) -> str:
     res = col.query(query_texts=[query], n_results=TOP_K)
     # Chroma 返回结构为嵌套列表：documents[0] 对应当前唯一 query 的 TOP_K 条
     docs = (res.get("documents") or [[]])[0]
+    # 调试：环境变量 RAG_DEBUG=1 时打印检索片段（排查「答非所问」是检索问题还是模型问题）
+    _dbg = (os.environ.get("RAG_DEBUG") or "").strip().lower()
+    if _dbg in ("1", "true", "yes", "on"):
+        print("RAG_DEBUG query:", query, file=sys.stderr, flush=True)
+        print("RAG_DEBUG documents:", docs, file=sys.stderr, flush=True)
     context = "\n\n".join(docs) if docs else ""
 
     model = (os.environ.get("OPENAI_CHAT_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
