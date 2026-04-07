@@ -7,13 +7,17 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 cd "$ROOT"
 
-# 优先 python3，没有则用 python
-PY="${PYTHON:-python3}"
-if ! command -v "$PY" &>/dev/null; then
+# 优先：$PYTHON → python3.12（Homebrew python@3.12 常见）→ python3 → python
+if [[ -n "${PYTHON:-}" ]]; then
+  PY="$PYTHON"
+elif command -v python3.12 &>/dev/null; then
+  PY=python3.12
+elif command -v python3 &>/dev/null; then
+  PY=python3
+elif command -v python &>/dev/null; then
   PY=python
-fi
-if ! command -v "$PY" &>/dev/null; then
-  echo "未找到 python3/python，请先安装 Python 3.10+" >&2
+else
+  echo "未找到 python3.12/python3/python，请先安装 Python 3.10+（macOS：brew install python@3.12）" >&2
   exit 1
 fi
 

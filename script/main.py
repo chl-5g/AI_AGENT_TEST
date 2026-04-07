@@ -7,17 +7,16 @@ main.py — FastAPI 应用入口（路由 + 启动时自动入库 + 简易问答
     - lifespan：若本地 Chroma 已有非空索引则**跳过**入库（省 Token、避免 --reload 反复嵌入）；
       否则执行 ingestion.initialize()。全量重建请 POST /init 或删 chroma_data/ 后重启。
       失败时记录完整异常栈，但服务仍会启动。
-    - 路由：GET / 返回 static/index.html；POST /chat 调用 bot.chat；POST /init 可手动
-      全量重建索引；GET /health 供探活。
+    - 路由：GET / 返回 static/index.html；POST /chat 调用 bot.chat_with_sources；POST /init
+      异步触发全量重建索引；GET /health 供探活。
 
 与 bot / ingestion 的关系：
-    - 入库逻辑只在 ingestion.initialize()；问答检索在 bot.chat()；本文件不重复实现业务。
+    - 入库逻辑在 ingestion.initialize() / initialize_async()；问答在 bot.chat_with_sources()。
 """
 
 from __future__ import annotations
 
 import logging
-import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -25,20 +24,21 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from bot import chat
-from ingestion import PROJECT_ROOT, has_indexed_documents, initialize, load_project_env
+from bot import chat_with_sources
+from config import PROJECT_ROOT, get_settings, load_project_env
+from ingestion import has_indexed_documents, initialize, initialize_async
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # 环境变量：必须在定义 CORS、创建路由依赖的配置之前加载
 # ---------------------------------------------------------------------------
-# 尽早从「项目根」加载 .env（路径与 ingestion.PROJECT_ROOT 一致），使下方
+# 尽早从「项目根」加载 .env（路径与 config.PROJECT_ROOT 一致），使下方
 # CORS_ORIGINS、lifespan 内 initialize()、以及子模块再次 load_dotenv 时
 # 行为一致。注意：lifespan 内不再重复调用 load_project_env()，避免冗余。
 load_project_env()
 
-# 静态页在仓库根目录 static/（与 ingestion.PROJECT_ROOT 一致，代码在 script/ 时也能找到）
+# 静态页在仓库根目录 static/（与 config.PROJECT_ROOT 一致）
 _STATIC_INDEX = PROJECT_ROOT / "static" / "index.html"
 
 
@@ -73,7 +73,7 @@ async def lifespan(app: FastAPI):
             logger.info("启动时自动入库完成: %s", stats)
     except Exception:
         logger.exception(
-            "启动时自动入库失败：请检查 OPENAI_API_KEY、嵌入相关配置，以及 data/ 下是否有 .txt/.md"
+            "启动时自动入库失败：请检查 OPENAI_API_KEY、嵌入相关配置，以及 data/ 下是否有可解析资料（.txt/.md/.pdf/.docx）"
         )
     yield
 
@@ -89,7 +89,7 @@ app = FastAPI(title="极简 RAG 客服", version="0.1.0", lifespan=lifespan)
 #   - 未设置或 "*"：允许任意 Origin（开发方便，生产慎用）。
 #   - 逗号分隔多个具体 URL，例如 http://127.0.0.1:5173,http://localhost:3000
 # allow_credentials=False：与 allow_origins=["*"] 组合时浏览器规范要求如此。
-_cors = (os.environ.get("CORS_ORIGINS") or "*").strip()
+_cors = get_settings().cors_origins.strip()
 if _cors == "*":
     _allow_origins = ["*"]
 else:
@@ -102,6 +102,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class SourceItem(BaseModel):
+    """单条检索命中溯源信息（与 Chroma metadata 对齐）。"""
+
+    source: str = Field(default="", description="相对项目根的文件路径")
+    page: str = Field(default="-", description="PDF 页码；无页码时为 -")
+    file_type: str = Field(default="", description="txt / md / pdf / docx")
+    chunk_id: str = Field(default="", description="向量库中的文档 ID")
+    excerpt: str = Field(default="", description="片段摘要")
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    sources: list[SourceItem] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):
@@ -138,7 +153,7 @@ def index():
 
 
 @app.post("/init")
-def post_init():
+async def post_init():
     """
     可选：手动再次全量重建索引。
 
@@ -149,30 +164,30 @@ def post_init():
     失败时（缺 Key、嵌入网关错误等）返回 503，detail 为 RuntimeError 的文案。
     """
     try:
-        stats = initialize()
+        stats = await initialize_async()
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     return {"ok": True, **stats}
 
 
-@app.post("/chat")
+@app.post("/chat", response_model=ChatResponse)
 def post_chat(body: ChatRequest):
     """
     客服问答接口。
 
-    流程简述（详见 bot.chat）：
+    流程简述（详见 bot.chat_with_sources）：
         1. 使用与入库相同的嵌入函数打开 Chroma 集合并向量检索 TOP_K 段文本；
         2. 将检索结果拼成【背景资料】，与用户问题一并发给 OPENAI_CHAT_MODEL
-          （如 DeepSeek）生成回答。
-
-    配置类错误（缺 Key、集合打不开等）在 bot 层抛 RuntimeError，此处转为 503，
-    便于前端区分「服务不可用」与未捕获的 500。
+          （如 DeepSeek）生成回答；
+        3. 同时返回 sources 列表供前端展示引用溯源。
     """
     try:
-        answer = chat(body.query)
+        raw = chat_with_sources(body.query)
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
-    return {"answer": answer}
+    src_list = raw.get("sources") or []
+    sources = [SourceItem(**s) for s in src_list if isinstance(s, dict)]
+    return ChatResponse(answer=str(raw.get("answer") or ""), sources=sources)
 
 
 @app.get("/health")

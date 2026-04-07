@@ -1,5 +1,9 @@
-chromadb>=0.4.22
+# chromadb 0.4.15+ 需较新 Python；3.7 上 PyPI 常见最高为 0.4.14，故下限用 0.4.14。推荐 Python 3.10+ 与仓库根 .venv（见 run.sh）。
+chromadb>=0.4.14
 openai>=1.0.0
 fastapi>=0.100.0
 uvicorn[standard]>=0.22.0
 python-dotenv>=1.0.0
+# pypdf 4+ 多要求 Python 3.8+；3.17.x 在 3.7 上仍可装
+pypdf>=3.17.0
+python-docx>=1.1.0

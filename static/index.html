@@ -138,6 +138,22 @@
     .out.md th, .out.md td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
     .out.md th { background: rgba(0, 0, 0, 0.25); }
     .out.empty { color: var(--muted); white-space: pre-wrap; }
+    .sources {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .sources h3 {
+      font-size: 0.85rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+      color: var(--text);
+    }
+    .sources ul { margin: 0; padding-left: 1.1rem; }
+    .sources li { margin: 0.35em 0; line-height: 1.45; }
+    .sources .src-path { color: var(--accent); word-break: break-all; }
     .err { color: #f87171; }
     footer {
       margin-top: 2rem;
@@ -161,6 +177,7 @@
     </div>
 
     <div id="answer" class="out empty">回答会显示在这里。</div>
+    <div id="sources" class="sources" style="display:none;max-width:40rem;width:100%;"></div>
   </main>
   <footer>
     <a href="/docs">API 文档</a>
@@ -173,10 +190,17 @@
     const q = document.getElementById("q");
     const send = document.getElementById("send");
     const answer = document.getElementById("answer");
+    const sourcesEl = document.getElementById("sources");
     const hint = document.getElementById("hint");
 
     // 使用当前页面的 origin，避免相对路径在「非本服务打开的页面」里指错主机
     const apiChat = () => `${window.location.origin}/chat`;
+
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
 
     function renderMarkdown(text) {
       const t = text == null ? "" : String(text);
@@ -218,6 +242,8 @@
       hint.textContent = "正在生成…";
       answer.className = "out md";
       answer.innerHTML = "";
+      sourcesEl.style.display = "none";
+      sourcesEl.innerHTML = "";
 
       try {
         const res = await fetch(apiChat(), {
@@ -237,6 +263,28 @@
         answer.className = "out md";
         const raw = data.answer || "(空回答)";
         answer.innerHTML = renderMarkdown(raw);
+        const src = Array.isArray(data.sources) ? data.sources : [];
+        if (src.length > 0) {
+          let html = "<h3>引用溯源（检索命中）</h3><ul>";
+          for (let i = 0; i < src.length; i++) {
+            const s = src[i] || {};
+            const path = s.source != null ? String(s.source) : "";
+            const page = s.page != null && String(s.page) !== "-" ? "，第 " + s.page + " 页" : "";
+            const ft = s.file_type ? " [" + s.file_type + "]" : "";
+            const ex = s.excerpt != null ? String(s.excerpt) : "";
+            html +=
+              "<li><span class=\"src-path\">" +
+              escapeHtml(path) +
+              "</span>" +
+              escapeHtml(ft) +
+              escapeHtml(page) +
+              (ex ? "<br/>「" + escapeHtml(ex) + "」" : "") +
+              "</li>";
+          }
+          html += "</ul>";
+          sourcesEl.innerHTML = html;
+          sourcesEl.style.display = "block";
+        }
       } catch (e) {
         answer.className = "out err empty";
         answer.textContent = "出错：" + formatFetchError(e);

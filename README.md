@@ -13,7 +13,8 @@
 | 向量库 | ChromaDB，持久化目录 `chroma_data/` |
 | HTTP | FastAPI + Uvicorn |
 | SDK | `openai`（对话与嵌入均可设 `base_url`） |
-| 配置 | 根目录 `.env`（复制 `.env.example`） |
+| 配置 | 根目录 `.env` + `script/config.py`（`get_settings()` 集中读取） |
+| 文档解析 | `pypdf`（PDF）、`python-docx`（Word） |
 
 **典型配置**：对话走 **DeepSeek**（`OPENAI_API_KEY` + `OPENAI_BASE_URL`）；嵌入走 **OpenRouter**（`OPENROUTER_API_KEY` + `OPENROUTER_EMBEDDING_MODEL`）。详见 [.env.example](.env.example) 与 [OpenRouter Embeddings](https://openrouter.ai/docs/api-reference/embeddings)。
 
@@ -27,25 +28,32 @@
 ├── run.sh                # Linux / macOS / WSL / Git Bash 一键启动（无需 chmod 时可直接 bash run.sh）
 ├── .env.example          # 环境变量模板（勿提交真实 .env）
 ├── requirements.txt      # Python 依赖
-├── data/                 # 知识库：*.txt / *.md（示例含脱敏 SOP）
-├── static/index.html     # 浏览器问答页
+├── data/                 # 知识库：*.txt / *.md / *.pdf / *.docx
+├── static/index.html     # 浏览器问答页（含「引用溯源」展示）
 ├── chroma_data/          # 本地向量库（运行后生成，已忽略）
 └── script/
-    ├── main.py           # FastAPI 入口、启动生命周期
-    ├── ingestion.py      # 切片、嵌入、initialize()、has_indexed_documents()
-    ├── bot.py            # Chroma 检索 + chat.completions
+    ├── main.py           # FastAPI 入口、生命周期、路由
+    ├── config.py         # 独立配置：PROJECT_ROOT、get_settings()、load_project_env()
+    ├── chunking.py       # 纯文本切片（字符窗口 + 重叠）
+    ├── doc_parse.py      # PDF（pypdf）/ Docx（python-docx）抽取与按页 metadata
+    ├── ingestion.py      # 并行解析多文件、嵌入、initialize() / initialize_async()
+    ├── bot.py            # Chroma 检索 + 溯源字段 + chat.completions
     └── cli.py            # 命令行提问
 ```
 
-**路径约定**：`ingestion` 中 `PROJECT_ROOT` 在代码位于 `script/` 时指向**上一级**（仓库根），因此 `.env`、`data/`、`chroma_data/`、`static/` 均在根目录解析。
+**路径约定**：`config.PROJECT_ROOT` 在代码位于 `script/` 时指向**上一级**（仓库根），`.env`、`data/`、`chroma_data/`、`static/` 均在根目录解析。
 
 ---
 
-## 切片与检索（与代码一致）
+## 切片、入库与检索（与代码一致）
 
-- 分段：优先按 `\n\n`，单段超过约 **400** 字符再滑窗，重叠 **50** 字符（`CHUNK_CHARS` / `CHUNK_OVERLAP`）。
-- 检索：默认 **Top 5**；可在 `.env` 设 **`RAG_TOP_K`** 覆盖。
-- 启动：若已有**非空** Chroma 集合，**跳过**全量 `initialize()`（避免 `uvicorn --reload` 反复打 Embedding）；更新资料后需 **`POST /init`**、删 `chroma_data/` 或 **`python cli.py --init`**。
+- **支持格式**：`data/` 下递归扫描 `.txt`、`.md`、`.pdf`、`.docx`。PDF 按**页**抽取文本，切片 metadata 带 `page`（1 起）；纯文本与 Docx 的 `page` 在库中为 `-`。
+- **分段**：优先按 `\n\n`，单段超过 **`CHUNK_CHARS`**（默认 400）再滑窗，重叠 **`CHUNK_OVERLAP`**（默认 50），可在 `.env` 覆盖（见 `.env.example`）。
+- **大批量入库**：解析阶段对多文件使用线程池（**`INGEST_IO_WORKERS`**，默认 4）；写入 Chroma 仍按 **`CHROMA_ADD_BATCH_SIZE`** 分批 `add`，避免单次请求过大。
+- **`POST /init`**：路由为 **async**，内部通过 **`initialize_async()`**（`asyncio.to_thread(initialize)`）执行全量重建，避免长时间阻塞事件循环（嵌入本身仍在工作线程中同步调用）。
+- **检索**：默认 **Top 5**；`.env` 中 **`RAG_TOP_K`** 覆盖（由 `config.get_settings()` 读取）。
+- **溯源**：每条向量 metadata 含 `source`（相对仓库根路径）、`page`、`file_type`；`POST /chat` 返回 **`sources`** 列表（含片段摘要），网页端同步展示；Prompt 要求模型在正文中括号标注来源。
+- **启动**：若已有**非空** Chroma 集合，**跳过**全量 `initialize()`；更新资料后需 **`POST /init`**、删 `chroma_data/` 或 **`python cli.py --init`**。
 
 ---
 
@@ -82,6 +90,8 @@
 ```bash
 pip install -r requirements.txt
 ```
+
+若报错 **`No matching distribution found for chromadb>=...`**，多半是用了 **Python 3.7** 自带的 `pip`（`pip -V` 会显示路径）。请改用 **Python 3.10+**：例如先 `./run.sh` 让脚本创建 `.venv` 并升级 pip，或执行 `python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt`。本项目的 `openai` v1、`fastapi` 新版本同样依赖较新的 Python，不建议继续用 3.7 跑全套服务。
 
 **2. 配置环境变量**（仓库根）：
 
@@ -133,24 +143,8 @@ python cli.py --init 任意  # 强制重建索引后再问
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/` | 简易网页问答 |
-| POST | `/chat` | JSON：`{"query": "..."}` → `{"answer": "..."}` |
-| POST | `/init` | 全量重建索引，返回 `ok`、`files`、`chunks` |
+| POST | `/chat` | JSON：`{"query": "..."}` → `{"answer": "...", "sources": [{ "source", "page", "file_type", "chunk_id", "excerpt" }]}` |
+| POST | `/init` | 异步执行全量重建索引，返回 `ok`、`files`、`chunks` |
 | GET | `/health` | `{"status":"ok"}` |
 
 ---
-
-## 刻意未实现（第一版）
-
-- PDF/Docx 自动解析、引用溯源、异步大批量入库、独立配置模块等。
-
----
-
-## 远程仓库
-
-示例：`https://github.com/chl-5g/AI_AGENT_TEST.git`
-
-```bash
-git add -A
-git commit -m "你的说明"
-git push origin main
-```
