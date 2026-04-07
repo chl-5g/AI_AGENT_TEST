@@ -23,6 +23,7 @@
 
 ```
 仓库根/
+├── run.sh                # 一键：建 venv、装依赖、检查 .env、启动 uvicorn（Bash）
 ├── .env.example          # 环境变量模板（勿提交真实 .env）
 ├── requirements.txt      # Python 依赖
 ├── data/                 # 知识库：*.txt / *.md（示例含脱敏 SOP）
@@ -42,12 +43,31 @@
 ## 切片与检索（与代码一致）
 
 - 分段：优先按 `\n\n`，单段超过约 **400** 字符再滑窗，重叠 **50** 字符（`CHUNK_CHARS` / `CHUNK_OVERLAP`）。
-- 检索：默认 **Top 5**（`bot.TOP_K`）。
+- 检索：默认 **Top 5**；可在 `.env` 设 **`RAG_TOP_K`** 覆盖。
 - 启动：若已有**非空** Chroma 集合，**跳过**全量 `initialize()`（避免 `uvicorn --reload` 反复打 Embedding）；更新资料后需 **`POST /init`**、删 `chroma_data/` 或 **`python cli.py --init`**。
 
 ---
 
 ## 运行方式
+
+### 一键启动（最少步骤）
+
+在 **Linux / macOS / WSL / Git Bash** 下，于仓库根目录执行：
+
+```bash
+chmod +x run.sh
+./run.sh
+```
+
+脚本会：创建 **`./.venv`** → `pip install -r requirements.txt` → 若没有 **`.env`** 则从 **`.env.example`** 复制一份并提示你**编辑填入 Key 后重新运行** → 启动 **http://127.0.0.1:8000**。
+
+**仍需你完成的一件事**：在仓库根编辑 **`.env`** 写入真实 API Key（脚本无法代填）。首次若因复制 `.env` 而退出，改完再执行一次 `./run.sh` 即可。
+
+原生 **Windows CMD** 没有 Bash，可改用 **WSL**、**Git Bash**，或见下文手动命令。
+
+---
+
+### 手动运行
 
 **1. 安装依赖**（建议在虚拟环境中，于仓库根执行）：
 
@@ -116,3 +136,13 @@ python cli.py --init 任意  # 强制重建索引后再问
 - PDF/Docx 自动解析、引用溯源、异步大批量入库、独立配置模块等。
 
 ---
+
+## 远程仓库
+
+示例：`https://github.com/chl-5g/AI_AGENT_TEST.git`
+
+```bash
+git add -A
+git commit -m "你的说明"
+git push origin main
+```

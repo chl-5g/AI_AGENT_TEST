@@ -32,16 +32,30 @@ from ingestion import (
     openai_embedding_function,
 )
 
-# 每次 query 返回最相近的文档段数量；过大易撑满上下文，过小可能漏掉关键句。
-TOP_K = 5
+# 默认检索条数；可通过环境变量 RAG_TOP_K 覆盖（资料长或总答「未找到」时可试 8～12）。
+_DEFAULT_TOP_K = 5
+
+
+def _top_k() -> int:
+    raw = (os.environ.get("RAG_TOP_K") or "").strip()
+    if not raw:
+        return _DEFAULT_TOP_K
+    try:
+        k = int(raw)
+        return k if k >= 1 else _DEFAULT_TOP_K
+    except ValueError:
+        return _DEFAULT_TOP_K
+
 
 # 系统约束写进单条 user 消息前缀（部分网关对 system 角色支持不一致时仍可用）。
-# 要求模型严格依据【背景资料】回答，资料没有则固定话术，减少幻觉。
+# 说明：原先「未提及就必须照抄固定句」过严，容易在检索片段其实相关时仍被判「未提及」；
+# 现改为：优先用背景资料作答（允许合理归纳、复述条款），仅当资料与问题完全无关时再固定话术。
 _SYSTEM_LINE = (
-    "你是一个严格的客服助手。仅限使用下方提供的【背景资料】回答问题。"
-    "如果资料中未提及相关内容，请礼貌地回答："
-    "'抱歉，在现有的项目管理规范中未找到相关规定，请咨询人工PM。' "
-    "严禁发挥或引用外部知识。"
+    "你是项目管理规范助手。请**优先且主要**根据下方【背景资料】回答用户问题："
+    "可直接引用或归纳条款中的流程、时限、角色、条件；不要编造资料中不存在的新制度。"
+    "仅当【背景资料】与问题**完全无关**、无法从中得到任何有用信息时，再**一字不差**回答："
+    "抱歉，在现有的项目管理规范中未找到相关规定，请咨询人工PM。"
+    "不要引用【背景资料】以外的外部知识作为事实依据。"
 )
 
 
@@ -102,7 +116,7 @@ def chat(query: str) -> str:
 
     步骤：
         1. _get_collection() 取得集合（嵌入与入库一致）；
-        2. col.query(query_texts=[query], n_results=TOP_K)：Chroma 用同一嵌入模型
+        2. col.query(query_texts=[query], n_results=top_k)：Chroma 用同一嵌入模型
            将 query 向量化并做相似度检索；
         3. 将返回的 documents 用双换行拼接为 context；
         4. OPENAI_CHAT_MODEL（默认 gpt-4o-mini）+ _openai_chat_client() 发起
@@ -111,15 +125,25 @@ def chat(query: str) -> str:
     返回：模型回复文本（strip 后）；若 content 为空则返回空字符串。
     """
     col = _get_collection()
-    res = col.query(query_texts=[query], n_results=TOP_K)
-    # Chroma 返回结构为嵌套列表：documents[0] 对应当前唯一 query 的 TOP_K 条
+    top_k = _top_k()
+    res = col.query(query_texts=[query], n_results=top_k)
+    # Chroma 返回结构为嵌套列表：documents[0] 对应当前唯一 query 的若干条
     docs = (res.get("documents") or [[]])[0]
+    docs = [d for d in (docs or []) if isinstance(d, str) and d.strip()]
     # 调试：环境变量 RAG_DEBUG=1 时打印检索片段（排查「答非所问」是检索问题还是模型问题）
     _dbg = (os.environ.get("RAG_DEBUG") or "").strip().lower()
     if _dbg in ("1", "true", "yes", "on"):
         print("RAG_DEBUG query:", query, file=sys.stderr, flush=True)
+        print("RAG_DEBUG top_k:", top_k, file=sys.stderr, flush=True)
         print("RAG_DEBUG documents:", docs, file=sys.stderr, flush=True)
-    context = "\n\n".join(docs) if docs else ""
+    if not docs:
+        return (
+            "（系统提示）检索未返回任何文档片段，无法根据知识库作答。"
+            "请确认已执行过入库：在网页调用 POST /init，或删除 chroma_data 后重启服务，"
+            "或在 script 目录执行 python cli.py --init。"
+            "若已入库仍为空，请设置环境变量 RAG_DEBUG=1 查看服务端日志中的检索结果。"
+        )
+    context = "\n\n".join(docs)
 
     model = (os.environ.get("OPENAI_CHAT_MODEL") or "gpt-4o-mini").strip() or "gpt-4o-mini"
     client = _openai_chat_client()
