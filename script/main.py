@@ -24,9 +24,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from bot import chat_with_sources
-from config import PROJECT_ROOT, get_settings, load_project_env
-from ingestion import has_indexed_documents, initialize, initialize_async
+try:
+    from .bot import chat_with_sources
+    from .config import PROJECT_ROOT, get_settings, load_project_env
+    from .ingestion import has_indexed_documents, initialize, initialize_async
+except ImportError:  # 兼容直接在 script/ 下运行
+    from bot import chat_with_sources
+    from config import PROJECT_ROOT, get_settings, load_project_env
+    from ingestion import has_indexed_documents, initialize, initialize_async
 
 logger = logging.getLogger(__name__)
 

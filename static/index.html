@@ -166,7 +166,7 @@
 <body>
   <main>
     <h1>极简 RAG 客服</h1>
-    <p class="sub">在下方输入问题，回答会基于 <code>data/</code> 中的资料检索生成。</p>
+    <p class="sub">在下方输入问题，回答会基于知识库中的资料检索生成。</p>
 
     <label for="q">你的问题</label>
     <textarea id="q" placeholder="例如：需求变更要走什么流程？" autofocus></textarea>
@@ -181,7 +181,7 @@
   </main>
   <footer>
     <a href="/docs">API 文档</a>
-    · 有索引时启动会跳过全量入库；更新 data/ 后可 POST /init
+    · 有索引时启动会跳过全量入库；更新知识库后可 POST /init
   </footer>
 
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" crossorigin="anonymous"></script>

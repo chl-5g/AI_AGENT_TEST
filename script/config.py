@@ -10,8 +10,32 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-_THIS_FILE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = _THIS_FILE_DIR.parent if _THIS_FILE_DIR.name == "script" else _THIS_FILE_DIR
+def _detect_project_root() -> Path:
+    """
+    计算项目根目录，支持源码运行与安装后包运行两种形态。
+
+    优先级：
+    1) AI_AGENT_HOME 环境变量（显式指定）
+    2) 当前文件在仓库 script/ 下，且上一级有 data/ 或 static/（源码运行）
+    3) 当前工作目录（安装后从项目根执行命令）
+    4) 当前文件目录（兜底）
+    """
+    env_home = (os.environ.get("AI_AGENT_HOME") or "").strip()
+    if env_home:
+        return Path(env_home).expanduser().resolve()
+
+    this_dir = Path(__file__).resolve().parent
+    parent = this_dir.parent
+    if this_dir.name == "script" and ((parent / "data").exists() or (parent / "static").exists()):
+        return parent
+
+    cwd = Path.cwd().resolve()
+    if (cwd / "data").exists() or (cwd / "static").exists():
+        return cwd
+    return this_dir
+
+
+PROJECT_ROOT = _detect_project_root()
 
 
 def load_project_env() -> None:
@@ -34,6 +58,22 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if not raw:
         return default
     return raw in ("1", "true", "yes", "on")
+
+
+def _resolve_data_dir(root: Path) -> Path:
+    """
+    从 .env 读取知识库目录（RAG_KB_DIR），默认 data/。
+
+    - 相对路径：相对 PROJECT_ROOT 解析
+    - 绝对路径：按绝对路径使用
+    """
+    raw = (os.environ.get("RAG_KB_DIR") or "data").strip()
+    if not raw:
+        raw = "data"
+    p = Path(raw).expanduser()
+    if not p.is_absolute():
+        p = root / p
+    return p.resolve()
 
 
 @dataclass(frozen=True)
@@ -67,7 +107,7 @@ def get_settings() -> Settings:
         chroma_path=str(root / "chroma_data"),
         collection_name=(os.environ.get("CHROMA_COLLECTION_NAME") or "support_docs").strip()
         or "support_docs",
-        data_dir=root / "data",
+        data_dir=_resolve_data_dir(root),
         chunk_chars=chunk_chars,
         chunk_overlap=chunk_overlap,
         chroma_add_batch_size=batch,

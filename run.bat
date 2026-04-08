@@ -46,8 +46,8 @@ if not exist ".env" (
 )
 
 set PYTHONUTF8=1
-cd /d "%~dp0script"
+cd /d "%~dp0"
 echo ^>^>^> 服务地址 http://127.0.0.1:8000  （Ctrl+C 停止）
-uvicorn main:app --reload --host 127.0.0.1 --port 8000
+python -m script.deploy --reload --host 127.0.0.1 --port 8000
 
 endlocal

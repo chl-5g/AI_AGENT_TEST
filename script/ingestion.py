@@ -23,8 +23,12 @@ from pathlib import Path
 import chromadb
 from chromadb.utils import embedding_functions
 
-from config import PROJECT_ROOT, get_settings, load_project_env
-from doc_parse import parse_document
+try:
+    from .config import PROJECT_ROOT, get_settings, load_project_env
+    from .doc_parse import parse_document
+except ImportError:  # 兼容直接在 script/ 下运行
+    from config import PROJECT_ROOT, get_settings, load_project_env
+    from doc_parse import parse_document
 
 # ---------------------------------------------------------------------------
 # 与历史代码兼容：bot / main 可能仍从 ingestion 引用下列名

@@ -28,10 +28,13 @@
 ├── run.sh                # Linux / macOS / WSL / Git Bash 一键启动（无需 chmod 时可直接 bash run.sh）
 ├── .env.example          # 环境变量模板（勿提交真实 .env）
 ├── requirements.txt      # Python 依赖
+├── pyproject.toml        # 打包配置（支持 pip install . 与命令行入口）
 ├── data/                 # 知识库：*.txt / *.md / *.pdf / *.docx
 ├── static/index.html     # 浏览器问答页（含「引用溯源」展示）
 ├── chroma_data/          # 本地向量库（运行后生成，已忽略）
 └── script/
+    ├── __init__.py       # 包标识
+    ├── deploy.py         # 一键部署入口（python -m script.deploy）
     ├── main.py           # FastAPI 入口、生命周期、路由
     ├── config.py         # 独立配置：PROJECT_ROOT、get_settings()、load_project_env()
     ├── chunking.py       # 纯文本切片（字符窗口 + 重叠）
@@ -48,6 +51,7 @@
 ## 切片、入库与检索（与代码一致）
 
 - **支持格式**：`data/` 下递归扫描 `.txt`、`.md`、`.pdf`、`.docx`。PDF 按**页**抽取文本，切片 metadata 带 `page`（1 起）；纯文本与 Docx 的 `page` 在库中为 `-`。
+- **知识库目录可配置**：`.env` 可设 `RAG_KB_DIR`（默认 `data/`），支持相对路径（相对项目根）或绝对路径。
 - **分段**：优先按 `\n\n`，单段超过 **`CHUNK_CHARS`**（默认 400）再滑窗，重叠 **`CHUNK_OVERLAP`**（默认 50），可在 `.env` 覆盖（见 `.env.example`）。
 - **大批量入库**：解析阶段对多文件使用线程池（**`INGEST_IO_WORKERS`**，默认 4）；写入 Chroma 仍按 **`CHROMA_ADD_BATCH_SIZE`** 分批 `add`，避免单次请求过大。
 - **`POST /init`**：路由为 **async**，内部通过 **`initialize_async()`**（`asyncio.to_thread(initialize)`）执行全量重建，避免长时间阻塞事件循环（嵌入本身仍在工作线程中同步调用）。
@@ -83,6 +87,24 @@
 
 ---
 
+### 打包安装（可选）
+
+项目已支持 Python 包方式安装，安装后可直接用命令行入口启动：
+
+```bash
+pip install .
+ai-rag-serve --reload --host 127.0.0.1 --port 8000
+ai-rag-cli --init 需求变更怎么走
+```
+
+若不在仓库根目录启动，可显式指定项目根（用于定位 `.env` / `data` / `static`）：
+
+```bash
+AI_AGENT_HOME=/path/to/AI_AGENT_TEST ai-rag-serve --host 0.0.0.0 --port 8000
+```
+
+---
+
 ### 手动运行
 
 **1. 安装依赖**（建议在虚拟环境中，于仓库根执行）：
@@ -105,22 +127,20 @@ cp .env.example .env
 
 编辑 `.env` 填入真实 Key（勿提交 `.env`）。
 
-**3. 启动 Web 服务**（必须先进入 `script/`，否则 `import bot` 会失败）：
+**3. 启动 Web 服务**（推荐统一入口）：
 
 ```bash
-cd script
-uvicorn main:app --reload
+python -m script.deploy --reload --host 127.0.0.1 --port 8000
 ```
 
 浏览器访问：**http://127.0.0.1:8000/**
 
-**4. 命令行提问**（同样在 `script/` 下）：
+**4. 命令行提问**：
 
 ```bash
-cd script
-python cli.py 你的问题一句话
-python cli.py              # 交互模式，空行结束
-python cli.py --init 任意  # 强制重建索引后再问
+python -m script.cli 你的问题一句话
+python -m script.cli              # 交互模式，空行结束
+python -m script.cli --init 任意  # 强制重建索引后再问
 ```
 
 **Windows 中文**：资料读取为 UTF-8；CLI 会尝试将标准输出设为 UTF-8。若终端仍乱码，可先执行 `chcp 65001` 或设置环境变量 `PYTHONUTF8=1`。

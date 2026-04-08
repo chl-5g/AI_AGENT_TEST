@@ -7,7 +7,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from chunking import split_text
+try:
+    from .chunking import split_text
+except ImportError:  # 兼容直接在 script/ 下运行
+    from chunking import split_text
 
 
 @dataclass(frozen=True)

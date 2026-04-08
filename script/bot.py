@@ -16,8 +16,12 @@ from typing import Any
 import chromadb
 from openai import OpenAI
 
-from config import PROJECT_ROOT, get_settings, load_project_env
-from ingestion import normalize_api_base, openai_embedding_function
+try:
+    from .config import PROJECT_ROOT, get_settings, load_project_env
+    from .ingestion import normalize_api_base, openai_embedding_function
+except ImportError:  # 兼容直接在 script/ 下运行
+    from config import PROJECT_ROOT, get_settings, load_project_env
+    from ingestion import normalize_api_base, openai_embedding_function
 
 _SYSTEM_LINE = """你是项目管理规范助手，必须依据下方【背景资料】作答，并遵守：
 

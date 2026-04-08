@@ -53,6 +53,6 @@ fi
 # 减少中文乱码（终端支持 UTF-8 时）
 export PYTHONUTF8="${PYTHONUTF8:-1}"
 
-cd "$ROOT/script"
+cd "$ROOT"
 echo ">>> 服务地址: http://127.0.0.1:8000  （Ctrl+C 停止）"
-exec uvicorn main:app --reload --host 127.0.0.1 --port 8000
+exec python -m script.deploy --reload --host 127.0.0.1 --port 8000

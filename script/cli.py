@@ -27,8 +27,17 @@ from __future__ import annotations
 import argparse
 import sys
 
-from bot import chat
-from ingestion import has_indexed_documents, initialize, load_project_env
+try:
+    from .bot import chat
+    from .ingestion import has_indexed_documents, initialize, load_project_env
+except ImportError as e:
+    # 仅在“直接执行 script/cli.py（无包上下文）”时回退到旧导入方式；
+    # 若是依赖缺失（如 chromadb 未安装）应保留原始异常，避免误导。
+    if __package__ in (None, "") and "attempted relative import" in str(e):
+        from bot import chat
+        from ingestion import has_indexed_documents, initialize, load_project_env
+    else:
+        raise
 
 
 def _configure_stdio_utf8() -> None:
