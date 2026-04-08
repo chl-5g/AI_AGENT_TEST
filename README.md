@@ -1,6 +1,6 @@
 # AI_AGENT_TEST — 极简 RAG 客服
 
-基于 **ChromaDB** + **OpenAI 兼容 API** 的检索增强问答：模型只依据 `data/` 中的纯文本作答，不引用未入库内容。无 LangChain，无独立向量服务。
+基于 **ChromaDB** + **OpenAI 兼容 API** 的检索增强问答：模型只依据制定知识库路径的文档作答，不引用未入库内容。无 LangChain，无独立向量服务。
 
 **本仓库布局**：应用代码在 **`script/`**；配置与资料在**仓库根**（`.env`、`data/`、`static/`）；运行期生成 **`chroma_data/`**（已 `.gitignore`，勿提交）。
 
