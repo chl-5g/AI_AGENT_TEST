@@ -6,29 +6,48 @@
   <title>极简 RAG 客服</title>
   <style>
     :root {
-      --bg: #0f1419;
-      --panel: #1a2332;
-      --text: #e7ecf3;
-      --muted: #8b9cb3;
-      --accent: #3d8bfd;
-      --accent-hover: #5a9dff;
-      --border: #2d3a4d;
+      --bg: #eef2f9;
+      --panel: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --border: #cbd5e1;
+      --shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.04);
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Segoe UI", system-ui, sans-serif;
-      background: var(--bg);
+      font-family: "Segoe UI", system-ui, "PingFang SC", sans-serif;
       color: var(--text);
       display: flex;
       flex-direction: column;
       align-items: center;
       padding: 2rem 1rem;
+      /* 亮色背景：底层渐变 + 柔光斑（固定附着，滚动时仍有「整页底图」感） */
+      background-color: #e8edf5;
+      background-image:
+        radial-gradient(ellipse 100% 80% at 50% -30%, rgba(147, 197, 253, 0.45), transparent 55%),
+        radial-gradient(ellipse 70% 50% at 110% 20%, rgba(196, 181, 253, 0.22), transparent 50%),
+        radial-gradient(ellipse 60% 45% at -10% 80%, rgba(125, 211, 252, 0.28), transparent 50%),
+        radial-gradient(ellipse 50% 40% at 90% 95%, rgba(253, 224, 200, 0.35), transparent 45%),
+        linear-gradient(168deg, #fbfcff 0%, #f1f5f9 42%, #e8f0fa 100%);
+      background-attachment: fixed;
+      background-size: 100% 100%;
     }
     main {
       width: 100%;
       max-width: 40rem;
+    }
+    main code {
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 0.9em;
+      background: #f1f5f9;
+      padding: 0.12em 0.4em;
+      border-radius: 4px;
+      border: 1px solid #e2e8f0;
+      color: #475569;
     }
     h1 {
       font-size: 1.35rem;
@@ -51,17 +70,18 @@
       min-height: 6rem;
       padding: 0.75rem 1rem;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.92);
       color: var(--text);
       font-size: 1rem;
       line-height: 1.5;
       resize: vertical;
+      box-shadow: var(--shadow);
     }
     textarea:focus {
       outline: none;
       border-color: var(--accent);
-      box-shadow: 0 0 0 2px rgba(61, 139, 253, 0.25);
+      box-shadow: var(--shadow), 0 0 0 3px rgba(37, 99, 235, 0.2);
     }
     .row {
       display: flex;
@@ -87,9 +107,12 @@
     .out {
       margin-top: 1.75rem;
       padding: 1rem 1.1rem;
-      border-radius: 8px;
-      background: var(--panel);
-      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.9);
+      box-shadow: var(--shadow);
       min-height: 3rem;
       line-height: 1.6;
     }
@@ -106,18 +129,21 @@
     .out.md p { margin: 0.55em 0; }
     .out.md ul, .out.md ol { margin: 0.55em 0; padding-left: 1.35rem; }
     .out.md li { margin: 0.25em 0; }
-    .out.md strong { color: #fff; font-weight: 600; }
+    .out.md strong { color: #0c1222; font-weight: 600; }
     .out.md code {
       font-family: ui-monospace, Consolas, monospace;
       font-size: 0.88em;
-      background: rgba(0, 0, 0, 0.35);
+      background: #f1f5f9;
+      color: #334155;
       padding: 0.12em 0.4em;
       border-radius: 4px;
+      border: 1px solid #e2e8f0;
     }
     .out.md pre {
       margin: 0.75em 0;
       padding: 0.75rem 1rem;
-      background: rgba(0, 0, 0, 0.4);
+      background: #f8fafc;
+      color: #1e293b;
       border-radius: 8px;
       overflow-x: auto;
       border: 1px solid var(--border);
@@ -136,25 +162,38 @@
     .out.md hr { border: none; border-top: 1px solid var(--border); margin: 1rem 0; }
     .out.md table { border-collapse: collapse; width: 100%; font-size: 0.9rem; margin: 0.75em 0; }
     .out.md th, .out.md td { border: 1px solid var(--border); padding: 0.4rem 0.6rem; text-align: left; }
-    .out.md th { background: rgba(0, 0, 0, 0.25); }
+    .out.md th { background: #f1f5f9; color: #334155; }
     .out.empty { color: var(--muted); white-space: pre-wrap; }
-    .sources {
+    .sources-wrap {
       margin-top: 1rem;
-      padding-top: 1rem;
       border-top: 1px solid var(--border);
+      padding-top: 0.5rem;
+      max-width: 40rem;
+      width: 100%;
+    }
+    .sources-wrap summary.sources-summary {
+      cursor: pointer;
+      list-style: none;
+      font-size: 0.85rem;
+      color: var(--muted);
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+    .sources-wrap summary.sources-summary:hover { color: var(--accent); }
+    .sources-wrap summary.sources-summary::-webkit-details-marker { display: none; }
+    .sources-wrap .sources-hint { font-weight: 400; opacity: 0.85; }
+    .sources-body {
+      margin-top: 0.75rem;
       font-size: 0.8rem;
       color: var(--muted);
     }
-    .sources h3 {
-      font-size: 0.85rem;
-      font-weight: 600;
-      margin: 0 0 0.5rem;
-      color: var(--text);
-    }
-    .sources ul { margin: 0; padding-left: 1.1rem; }
-    .sources li { margin: 0.35em 0; line-height: 1.45; }
-    .sources .src-path { color: var(--accent); word-break: break-all; }
-    .err { color: #f87171; }
+    .sources-body ul { margin: 0; padding-left: 1.1rem; }
+    .sources-body li { margin: 0.35em 0; line-height: 1.45; }
+    .sources-body .src-path { color: var(--accent); word-break: break-all; }
+    .err { color: #dc2626; }
     footer {
       margin-top: 2rem;
       font-size: 0.8rem;
@@ -169,7 +208,7 @@
     <p class="sub">在下方输入问题，回答会基于知识库中的资料检索生成。</p>
 
     <label for="q">你的问题</label>
-    <textarea id="q" placeholder="例如：需求变更要走什么流程？" autofocus></textarea>
+    <textarea id="q" placeholder="Enter 发送 · Ctrl+Enter 换行&#10;例如：需求变更要走什么流程？" autofocus></textarea>
 
     <div class="row">
       <button type="button" id="send">发送</button>
@@ -177,7 +216,14 @@
     </div>
 
     <div id="answer" class="out empty">回答会显示在这里。</div>
-    <div id="sources" class="sources" style="display:none;max-width:40rem;width:100%;"></div>
+    <details id="sources-wrap" class="sources-wrap" style="display:none;">
+      <summary class="sources-summary">
+        <strong>引用溯源</strong>
+        <span>（<span id="sources-count">0</span> 条命中）</span>
+        <span class="sources-hint">点击展开</span>
+      </summary>
+      <div id="sources-body" class="sources-body"></div>
+    </details>
   </main>
   <footer>
     <a href="/docs">API 文档</a>
@@ -190,7 +236,9 @@
     const q = document.getElementById("q");
     const send = document.getElementById("send");
     const answer = document.getElementById("answer");
-    const sourcesEl = document.getElementById("sources");
+    const sourcesWrap = document.getElementById("sources-wrap");
+    const sourcesBody = document.getElementById("sources-body");
+    const sourcesCountEl = document.getElementById("sources-count");
     const hint = document.getElementById("hint");
 
     // 使用当前页面的 origin，避免相对路径在「非本服务打开的页面」里指错主机
@@ -236,14 +284,17 @@
       if (!text) {
         answer.className = "out err empty";
         answer.textContent = "请先输入问题。";
+        sourcesWrap.style.display = "none";
+        sourcesBody.innerHTML = "";
         return;
       }
       send.disabled = true;
       hint.textContent = "正在生成…";
       answer.className = "out md";
       answer.innerHTML = "";
-      sourcesEl.style.display = "none";
-      sourcesEl.innerHTML = "";
+      sourcesWrap.style.display = "none";
+      sourcesWrap.open = false;
+      sourcesBody.innerHTML = "";
 
       try {
         const res = await fetch(apiChat(), {
@@ -265,7 +316,7 @@
         answer.innerHTML = renderMarkdown(raw);
         const src = Array.isArray(data.sources) ? data.sources : [];
         if (src.length > 0) {
-          let html = "<h3>引用溯源（检索命中）</h3><ul>";
+          let html = "<ul>";
           for (let i = 0; i < src.length; i++) {
             const s = src[i] || {};
             const path = s.source != null ? String(s.source) : "";
@@ -282,12 +333,16 @@
               "</li>";
           }
           html += "</ul>";
-          sourcesEl.innerHTML = html;
-          sourcesEl.style.display = "block";
+          sourcesCountEl.textContent = String(src.length);
+          sourcesBody.innerHTML = html;
+          sourcesWrap.open = false;
+          sourcesWrap.style.display = "block";
         }
       } catch (e) {
         answer.className = "out err empty";
         answer.textContent = "出错：" + formatFetchError(e);
+        sourcesWrap.style.display = "none";
+        sourcesBody.innerHTML = "";
       } finally {
         send.disabled = false;
         hint.textContent = "";
@@ -295,8 +350,32 @@
     }
 
     send.addEventListener("click", ask);
+
+    function insertNewlineAtCursor(el) {
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      el.value = el.value.slice(0, start) + "\n" + el.value.slice(end);
+      el.selectionStart = el.selectionEnd = start + 1;
+    }
+
+    sourcesWrap.addEventListener("toggle", () => {
+      const hint = sourcesWrap.querySelector(".sources-hint");
+      if (hint) hint.textContent = sourcesWrap.open ? "点击收起" : "点击展开";
+    });
+
     q.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) ask();
+      if (ev.key !== "Enter") return;
+      // 拼音/日文等 IME 组字未结束时，Enter 用于上屏，勿当成发送
+      if (ev.isComposing) return;
+      // Ctrl+Enter / Cmd+Enter：换行（单独 Enter 在 textarea 里默认也是换行，故需手动插入）
+      if (ev.ctrlKey || ev.metaKey) {
+        ev.preventDefault();
+        insertNewlineAtCursor(ev.target);
+        return;
+      }
+      // 单独 Enter：发送，不插入换行
+      ev.preventDefault();
+      ask();
     });
   </script>
 </body>
